@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PokéScan — AI Card Identifier</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: #0a0a0f;
+      background-image:
+        radial-gradient(ellipse at 20% 20%, rgba(99,42,180,0.15) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 80%, rgba(220,38,38,0.1) 0%, transparent 60%);
+      font-family: 'Outfit', sans-serif;
+      color: #e2e8f0;
+    }
+    header {
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding: 24px 32px;
+      display: flex; align-items: center; gap: 16px;
+      background: rgba(255,255,255,0.02);
+    }
+    .logo {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, #7c3aed, #dc2626);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      box-shadow: 0 0 20px rgba(124,58,237,0.4);
+    }
+    .logo-title { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; }
+    .logo-sub { font-size: 12px; color: #64748b; font-family: 'Space Mono', monospace; margin-top: 2px; }
+    main { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+    #drop-zone {
+      border: 2px dashed rgba(255,255,255,0.1);
+      border-radius: 20px; padding: 60px 32px;
+      text-align: center; cursor: pointer;
+      transition: all 0.2s; background: rgba(255,255,255,0.02);
+      margin-bottom: 24px;
+    }
+    #drop-zone.has-image { padding: 16px; }
+    #drop-zone.dragging { border-color: #7c3aed; background: rgba(124,58,237,0.08); }
+    #drop-zone:hover { border-color: rgba(255,255,255,0.2); }
+    .drop-icon { font-size: 48px; margin-bottom: 16px; }
+    .drop-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    .drop-sub { font-size: 14px; color: #64748b; }
+    .image-preview { display: flex; gap: 24px; align-items: flex-start; }
+    #preview-img { max-height: 260px; max-width: 45%; border-radius: 12px; object-fit: contain; border: 1px solid rgba(255,255,255,0.1); }
+    .preview-info { text-align: left; flex: 1; }
+    .preview-label { font-size: 13px; color: #64748b; margin-bottom: 8px; font-family: 'Space Mono', monospace; }
+    .preview-hint { font-size: 15px; color: #94a3b8; margin-bottom: 20px; }
+
+    #scan-btn {
+      background: linear-gradient(135deg, #7c3aed, #9333ea);
+      border: none; border-radius: 12px; color: #fff;
+      padding: 14px 32px; font-size: 15px; font-weight: 700;
+      cursor: pointer; font-family: 'Outfit', sans-serif;
+      display: inline-flex; align-items: center; gap: 10px;
+      box-shadow: 0 0 24px rgba(124,58,237,0.4); transition: all 0.2s;
+    }
+    #scan-btn:disabled { background: rgba(124,58,237,0.3); box-shadow: none; cursor: not-allowed; }
+    #scan-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 0 32px rgba(124,58,237,0.5); }
+
+    .btn-green {
+      background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.3);
+      border-radius: 10px; color: #4ade80; padding: 10px 20px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      font-family: 'Outfit', sans-serif; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s;
+    }
+    .btn-green:hover { background: rgba(74,222,128,0.18); }
+    .btn-blue {
+      background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3);
+      border-radius: 8px; color: #60a5fa; padding: 6px 12px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      font-family: 'Outfit', sans-serif; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;
+    }
+    .btn-blue:hover { background: rgba(96,165,250,0.18); }
+    .btn-ghost {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; color: #94a3b8; padding: 4px 8px;
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      font-family: 'Outfit', sans-serif; display: inline-flex; align-items: center; gap: 4px; transition: all 0.2s;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
+
+    .spinner { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #error-box {
+      display: none; background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.3);
+      border-radius: 12px; padding: 14px 20px; margin-bottom: 24px; color: #fca5a5; font-size: 14px;
+    }
+    #scan-notes {
+      display: none; background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2);
+      border-radius: 12px; padding: 12px 20px; margin-bottom: 24px; color: #a78bfa;
+      font-size: 13px; font-family: 'Space Mono', monospace;
+    }
+
+    #results { display: none; }
+    .summary-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+    .summary-stats { display: flex; gap: 20px; align-items: center; }
+    .stat-label { color: #64748b; font-size: 12px; font-family: 'Space Mono', monospace; }
+    .stat-value { font-size: 28px; font-weight: 900; line-height: 1; }
+    .stat-value.green { font-size: 22px; font-weight: 700; color: #4ade80; }
+    .divider { width: 1px; height: 40px; background: rgba(255,255,255,0.08); }
+
+    .table-wrap { border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.02); overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 860px; }
+    thead tr { background: rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.07); }
+    th { padding: 13px 16px; text-align: left; font-size: 11px; font-weight: 700; color: #64748b; font-family: 'Space Mono', monospace; letter-spacing: 0.08em; cursor: pointer; user-select: none; white-space: nowrap; }
+    th:hover { color: #94a3b8; }
+    td { padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+    .card-name-link { font-weight: 600; font-size: 14px; color: #60a5fa; text-decoration: none; cursor: pointer; }
+    .card-name-link:hover { text-decoration: underline; }
+    .card-sub { font-size: 11px; color: #475569; font-family: 'Space Mono', monospace; margin-top: 2px; }
+    .badge { display: inline-block; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .price { font-family: 'Space Mono', monospace; font-size: 13px; color: #4ade80; }
+    .price-high { color: #86efac; }
+    .row-num { color: #475569; font-size: 12px; font-family: 'Space Mono', monospace; }
+
+    /* Editable fields */
+    .editable {
+      background: transparent; border: 1px solid transparent;
+      border-radius: 6px; color: inherit; font-family: inherit;
+      font-size: inherit; font-weight: inherit; padding: 3px 6px;
+      width: 100%; transition: all 0.15s;
+    }
+    .editable:hover { border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); }
+    .editable:focus { outline: none; border-color: #7c3aed; background: rgba(124,58,237,0.08); }
+    .editable-price { font-family: 'Space Mono', monospace; font-size: 13px; color: #4ade80; width: 70px; }
+    .editable-price-high { color: #86efac; }
+    .editable-notes { font-size: 12px; color: #64748b; width: 140px; }
+    .editable-name { font-weight: 600; font-size: 14px; color: #e2e8f0; min-width: 160px; width: 100%; }
+
+    .total-row td { background: rgba(74,222,128,0.05); border-top: 1px solid rgba(74,222,128,0.15) !important; font-family: 'Space Mono', monospace; font-size: 14px; color: #4ade80; font-weight: 700; }
+    .total-label { font-size: 12px; color: #64748b; }
+    .disclaimer { margin-top: 12px; font-size: 11px; color: #334155; font-family: 'Space Mono', monospace; text-align: center; }
+
+    /* Crop cell */
+    .crop-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .crop-thumb { width: 56px; height: 78px; border-radius: 6px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1); display: block; cursor: pointer; transition: all 0.15s; }
+    .crop-thumb:hover { border-color: #60a5fa; transform: scale(1.05); }
+    .crop-pending { width: 56px; height: 78px; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px dashed rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .crop-actions { display: flex; gap: 4px; }
+
+    /* Copy toast */
+    #copy-toast {
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(74,222,128,0.15); border: 1px solid rgba(74,222,128,0.3);
+      color: #4ade80; padding: 10px 20px; border-radius: 10px;
+      font-size: 13px; font-weight: 600; opacity: 0;
+      transition: all 0.3s; pointer-events: none; z-index: 9999;
+    }
+    #copy-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Crop editor modal */
+    #crop-modal {
+      display: none; position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.85); align-items: center; justify-content: center;
+    }
+    #crop-modal.open { display: flex; }
+    .crop-modal-box {
+      background: #12121a; border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px; padding: 24px; max-width: 90vw; max-height: 90vh;
+      display: flex; flex-direction: column; gap: 16px; overflow: hidden;
+    }
+    .crop-modal-header { display: flex; align-items: center; justify-content: space-between; }
+    .crop-modal-title { font-size: 16px; font-weight: 700; }
+    .crop-modal-hint { font-size: 12px; color: #64748b; font-family: 'Space Mono', monospace; margin-top: 2px; }
+    .crop-modal-close { background: rgba(255,255,255,0.06); border: none; color: #94a3b8; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+    .crop-modal-close:hover { background: rgba(255,255,255,0.12); color: #e2e8f0; }
+    #crop-canvas-wrap { position: relative; overflow: auto; max-height: 65vh; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); cursor: crosshair; user-select: none; }
+    #crop-canvas { display: block; }
+    .crop-modal-footer { display: flex; gap: 10px; justify-content: flex-end; }
+    .btn-apply {
+      background: linear-gradient(135deg, #7c3aed, #9333ea); border: none; border-radius: 10px; color: #fff;
+      padding: 10px 24px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'Outfit', sans-serif;
+    }
+    .btn-apply:hover { opacity: 0.9; }
+    .btn-cancel { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #94a3b8; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Outfit', sans-serif; }
+    .btn-cancel:hover { background: rgba(255,255,255,0.1); }
+
+    #offscreen-canvas { display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚡</div>
+  <div>
+    <div class="logo-title">PokéScan</div>
+    <div class="logo-sub">AI-POWERED CARD IDENTIFIER</div>
+  </div>
+</header>
+
+<div id="api-key-bar">
+  <label>POKÉMONTCG API KEY (OPTIONAL)</label>
+  <input id="ptcg-api-key" type="password" placeholder="Paste key for higher rate limits — works without one" autocomplete="off" />
+  <span id="ptcg-status" style="font-size:12px;color:#64748b;font-family:'Space Mono',monospace;"></span>
+</div>
+
+<main>
+  <div id="drop-zone">
+    <input type="file" id="file-input" accept="image/*" style="display:none" />
+    <div id="empty-state">
+      <div class="drop-icon">🃏</div>
+      <div class="drop-title">Drop your card photo here</div>
+      <div class="drop-sub">or click to browse — JPG, PNG, WEBP supported</div>
+    </div>
+    <div id="preview-state" style="display:none">
+      <div class="image-preview">
+        <img id="preview-img" src="" alt="Uploaded cards" />
+        <div class="preview-info">
+          <div class="preview-label">IMAGE LOADED</div>
+          <div class="preview-hint">Click anywhere to replace, or scan below.</div>
+          <button id="scan-btn"><span>⚡</span> Scan Cards</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="error-box"></div>
+  <div id="scan-notes"></div>
+
+  <div id="results">
+    <div class="summary-bar">
+      <div class="summary-stats">
+        <div>
+          <div class="stat-label">CARDS FOUND</div>
+          <div class="stat-value" id="card-count">0</div>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <div class="stat-label">EST. VALUE RANGE</div>
+          <div class="stat-value green" id="value-range">—</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button id="download-all-btn" class="btn-blue" style="display:none">⬇ Download All Crops</button>
+        <button id="export-btn" class="btn-green">↓ Export CSV</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="cursor:default">Crop</th>
+            <th data-col="#">#</th>
+            <th data-col="name">Card Name</th>
+            <th data-col="set">Set</th>
+            <th data-col="rarity">Rarity</th>
+            <th data-col="condition">Condition</th>
+            <th data-col="estimated_price_low">Market $</th>
+            <th data-col="estimated_price_high">Mid $</th>
+            <th style="cursor:default">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="card-table-body"></tbody>
+      </table>
+    </div>
+    <div class="disclaimer">⚠ Prices are AI estimates. Crops are approximate — click ✏ to adjust manually. Always verify on TCGPlayer.</div>
+  </div>
+</main>
+
+<!-- Crop Editor Modal -->
+<div id="crop-modal">
+  <div class="crop-modal-box">
+    <div class="crop-modal-header">
+      <div>
+        <div class="crop-modal-title" id="crop-modal-title">Adjust Crop</div>
+        <div class="crop-modal-hint">Click and drag to draw a new crop box</div>
+      </div>
+      <button class="crop-modal-close" id="crop-modal-close">✕</button>
+    </div>
+    <div id="crop-canvas-wrap">
+      <canvas id="crop-canvas"></canvas>
+    </div>
+    <div class="crop-modal-footer">
+      <button class="btn-cancel" id="crop-cancel">Cancel</button>
+      <button class="btn-apply" id="crop-apply">Apply Crop</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="copy-toast">📋 Copied to clipboard!</div>
+
+<canvas id="offscreen-canvas"></canvas>
+
+<script>
+const WORKER_URL = "https://pokescan-proxy.dlmgallant.workers.dev";
+
+const SYSTEM_PROMPT = `You are an expert Pokémon TCG card identifier and price estimator. When given an image of Pokémon cards, identify EVERY visible card and return tight bounding boxes for cropping.
+
+IMPORTANT language rule: Assume all cards are English unless the card visibly displays non-English text (Japanese, Korean, etc.). Do NOT infer language from card style, art, or printing alone.
+
+IMPORTANT for bounding boxes: return coordinates that tightly wrap just the card face itself. Do NOT extend into adjacent cards. If cards are overlapping, use the visible portion only. Add NO extra padding.
+
+For each card provide:
+- name: card name
+- set: set name
+- set_number: card number if visible, or null
+- rarity: (Common, Uncommon, Rare, Holo Rare, Ultra Rare, Secret Rare, etc.)
+- card_type: "Pokémon", "Trainer", or "Energy"
+- condition: (Mint, Near Mint, Lightly Played, Moderately Played, Heavily Played)
+- estimated_price_low: low-end USD price estimate (number only)
+- estimated_price_high: high-end USD price estimate (number only)
+- notes: ONLY special attributes worth noting for a seller — e.g. "1st Edition", "Shadowless", "Full Art", "Rainbow Rare", "Promo", "Gold Border", "Unlimited". Leave null for standard cards with nothing unusual. Do NOT describe the card art or gameplay content.
+- bbox: tight bounding box as percentage { "x": left%, "y": top%, "w": width%, "h": height% } values 0-100
+
+Respond ONLY with valid JSON, no markdown:
+{"cards":[{"name":"string","set":"string","set_number":"string or null","rarity":"string","card_type":"string","condition":"string","estimated_price_low":number,"estimated_price_high":number,"notes":"string or null","bbox":{"x":number,"y":number,"w":number,"h":number}}],"scan_notes":"string"}`;
+
+let cards = [];
+let sortKey = null;
+let sortDir = 'asc';
+let imageBase64 = null;
+let imageMime = 'image/jpeg';
+let loadedImage = null;
+let cropDataUrls = {};
+
+// Crop editor state
+let editingCardIndex = null;
+let cropDrag = { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 };
+let currentCropRect = null; // in image pixel coords
+
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const emptyState = document.getElementById('empty-state');
+const previewState = document.getElementById('preview-state');
+const previewImg = document.getElementById('preview-img');
+const scanBtn = document.getElementById('scan-btn');
+const errorBox = document.getElementById('error-box');
+const scanNotesEl = document.getElementById('scan-notes');
+const results = document.getElementById('results');
+const cardCount = document.getElementById('card-count');
+const valueRange = document.getElementById('value-range');
+const tbody = document.getElementById('card-table-body');
+const exportBtn = document.getElementById('export-btn');
+const downloadAllBtn = document.getElementById('download-all-btn');
+const offCanvas = document.getElementById('offscreen-canvas');
+const offCtx = offCanvas.getContext('2d');
+const cropModal = document.getElementById('crop-modal');
+const cropCanvas = document.getElementById('crop-canvas');
+const cropCtx = cropCanvas.getContext('2d');
+const copyToast = document.getElementById('copy-toast');
+
+// ── File handling ──────────────────────────────────────────
+function handleFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  imageMime = file.type;
+  const url = URL.createObjectURL(file);
+  previewImg.src = url;
+  emptyState.style.display = 'none';
+  previewState.style.display = 'block';
+  dropZone.classList.add('has-image');
+  cards = []; cropDataUrls = {};
+  results.style.display = 'none';
+  errorBox.style.display = 'none';
+  scanNotesEl.style.display = 'none';
+  downloadAllBtn.style.display = 'none';
+  loadedImage = new Image();
+  loadedImage.src = url;
+  const reader = new FileReader();
+  reader.onload = (e) => { imageBase64 = e.target.result.split(',')[1]; };
+  reader.readAsDataURL(file);
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragging'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragging'); handleFile(e.dataTransfer.files[0]); });
+
+// ── Cropping ──────────────────────────────────────────────
+function cropCard(bbox) {
+  if (!loadedImage || !loadedImage.complete) return null;
+  const iw = loadedImage.naturalWidth, ih = loadedImage.naturalHeight;
+  const x = Math.max(0, (bbox.x / 100) * iw);
+  const y = Math.max(0, (bbox.y / 100) * ih);
+  const w = Math.min(iw - x, (bbox.w / 100) * iw);
+  const h = Math.min(ih - y, (bbox.h / 100) * ih);
+  offCanvas.width = w; offCanvas.height = h;
+  offCtx.clearRect(0, 0, w, h);
+  offCtx.drawImage(loadedImage, x, y, w, h, 0, 0, w, h);
+  return offCanvas.toDataURL('image/jpeg', 0.92);
+}
+
+function cropCardPixels(px, py, pw, ph) {
+  if (!loadedImage || !loadedImage.complete) return null;
+  offCanvas.width = pw; offCanvas.height = ph;
+  offCtx.clearRect(0, 0, pw, ph);
+  offCtx.drawImage(loadedImage, px, py, pw, ph, 0, 0, pw, ph);
+  return offCanvas.toDataURL('image/jpeg', 0.92);
+}
+
+function generateAllCrops() {
+  cropDataUrls = {};
+  cards.forEach((card, i) => {
+    if (card.bbox) {
+      const d = cropCard(card.bbox);
+      if (d) cropDataUrls[i] = d;
+    }
+  });
+}
+
+function slugify(name, set) {
+  return `${name}-${set}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// ── Scan ──────────────────────────────────────────────────
+scanBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!imageBase64) return;
+  scanBtn.disabled = true;
+  scanBtn.innerHTML = '<span class="spinner">⟳</span> Scanning cards...';
+  errorBox.style.display = 'none';
+  scanNotesEl.style.display = 'none';
+  results.style.display = 'none';
+  cards = []; cropDataUrls = {};
+
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 4096, system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: imageMime, data: imageBase64 } },
+          { type: 'text', text: 'Identify all Pokémon cards, provide pricing, and include tight bounding boxes for each card crop.' }
+        ]}]
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const textBlock = data.content?.find(b => b.type === 'text');
+    if (!textBlock) throw new Error('No response from AI.');
+    let raw = textBlock.text.trim().replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(raw);
+    cards = parsed.cards || [];
+    if (parsed.scan_notes) { scanNotesEl.textContent = '📋 ' + parsed.scan_notes; scanNotesEl.style.display = 'block'; }
+    if (!loadedImage.complete) await new Promise(r => { loadedImage.onload = r; });
+    generateAllCrops();
+    renderTable();
+    results.style.display = 'block';
+    if (Object.keys(cropDataUrls).length > 0) downloadAllBtn.style.display = 'inline-flex';
+    // Fetch live prices after initial render
+    fetchLivePrices();
+  } catch (err) {
+    errorBox.textContent = '⚠ ' + (err.message || 'Something went wrong.');
+    errorBox.style.display = 'block';
+  } finally {
+    scanBtn.disabled = false;
+    scanBtn.innerHTML = '<span>⚡</span> Scan Cards';
+  }
+});
+
+// ── Colors ────────────────────────────────────────────────
+function rarityColor(r) {
+  r = (r||'').toLowerCase();
+  if (r.includes('secret')) return '#ff6b6b';
+  if (r.includes('ultra')||r.includes('full art')||r.includes('rainbow')) return '#c084fc';
+  if (r.includes('holo')||r.includes('rare')) return '#60a5fa';
+  if (r.includes('uncommon')) return '#34d399';
+  return '#94a3b8';
+}
+function conditionColor(c) {
+  c = (c||'').toLowerCase();
+  if (c.includes('near mint')||c.includes('mint')) return '#4ade80';
+  if (c.includes('lightly')) return '#facc15';
+  if (c.includes('moderately')) return '#fb923c';
+  if (c.includes('heavily')) return '#f87171';
+  return '#94a3b8';
+}
+
+function getSorted() {
+  const indexed = cards.map((c, i) => ({ ...c, _origIndex: i }));
+  if (!sortKey) return indexed;
+  return indexed.sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+// ── Render table ──────────────────────────────────────────
+function renderTable() {
+  const sorted = getSorted();
+  const totalLow = cards.reduce((s, c) => s + (Number(c.estimated_price_low)||0), 0);
+  const totalHigh = cards.reduce((s, c) => s + (Number(c.estimated_price_high)||0), 0);
+  cardCount.textContent = cards.length;
+  valueRange.textContent = `$${totalLow.toFixed(2)} – $${totalHigh.toFixed(2)}`;
+
+  tbody.innerHTML = sorted.map((c, displayIdx) => {
+    const oi = c._origIndex;
+    const rc = rarityColor(c.rarity), cc = conditionColor(c.condition);
+    const cropSrc = cropDataUrls[oi];
+    const filename = `${String(oi+1).padStart(2,'0')}-${slugify(c.name, c.set)}.jpg`;
+    const tcgUrl = c._tcgplayerUrl || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(c.name + (c.set ? " " + c.set : ""))}&view=grid`;
+
+    const thumbCell = cropSrc
+      ? `<td><div class="crop-cell">
+           <img class="crop-thumb" src="${cropSrc}" alt="${c.name}" title="Click to edit crop" onclick="openCropEditor(${oi})" />
+           <div class="crop-actions">
+             <a class="btn-ghost" href="${cropSrc}" download="${filename}" title="Download">↓</a>
+             <button class="btn-ghost" onclick="copyCrop(${oi})" title="Copy to clipboard">⎘</button>
+             <button class="btn-ghost" onclick="openCropEditor(${oi})" title="Edit crop">✏</button>
+           </div>
+         </div></td>`
+      : `<td><div class="crop-cell">
+           <div class="crop-pending" title="No crop — click to draw one" onclick="openCropEditor(${oi})" style="cursor:pointer">✏</div>
+           <button class="btn-ghost" onclick="openCropEditor(${oi})">Draw</button>
+         </div></td>`;
+
+    return `<tr>
+      ${thumbCell}
+      <td class="row-num">${displayIdx+1}</td>
+      <td>
+        <a class="card-name-link" href="${tcgUrl}" target="_blank" title="Search on TCGPlayer">
+          <input class="editable editable-name" value="${escHtml(c.name)}" onchange="updateCard(${oi},'name',this.value)" onclick="event.stopPropagation()" />
+        </a>
+        ${c.set_number ? `<div class="card-sub">#${c.set_number} · ${c.card_type}</div>` : ''}
+      </td>
+      <td><input class="editable" style="font-size:13px;color:#94a3b8;width:130px" value="${escHtml(c.set)}" onchange="updateCard(${oi},'set',this.value)" /></td>
+      <td><span class="badge" style="background:${rc}18;color:${rc};border:1px solid ${rc}40">${c.rarity}</span></td>
+      <td><span class="badge" style="background:${cc}18;color:${cc};border:1px solid ${cc}40">${c.condition}</span></td>
+      <td><div class="price-cell">
+        <input class="editable editable-price" value="${Number(c.estimated_price_low).toFixed(2)}" onchange="updateCard(${oi},'estimated_price_low',parseFloat(this.value)||0)" />
+        <span class="price-source ${c._priceSource === 'live' ? 'price-live' : 'price-estimated'}">${c._priceSource === 'live' ? '● LIVE' : '● EST'}</span>
+      </div></td>
+      <td><input class="editable editable-price editable-price-high" value="${Number(c.estimated_price_high).toFixed(2)}" onchange="updateCard(${oi},'estimated_price_high',parseFloat(this.value)||0)" /></td>
+      <td><input class="editable editable-notes" value="${escHtml(c.notes||'')}" onchange="updateCard(${oi},'notes',this.value)" /></td>
+    </tr>`;
+  }).join('');
+
+  tbody.innerHTML += `<tr class="total-row">
+    <td></td><td colspan="5" class="total-label">TOTAL ESTIMATED VALUE</td>
+    <td>$${totalLow.toFixed(2)}</td><td>$${totalHigh.toFixed(2)}</td><td></td>
+  </tr>`;
+}
+
+function escHtml(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Inline edit ───────────────────────────────────────────
+function updateCard(index, field, value) {
+  cards[index][field] = value;
+  // Recalc totals only
+  const totalLow = cards.reduce((s, c) => s + (Number(c.estimated_price_low)||0), 0);
+  const totalHigh = cards.reduce((s, c) => s + (Number(c.estimated_price_high)||0), 0);
+  valueRange.textContent = `$${totalLow.toFixed(2)} – $${totalHigh.toFixed(2)}`;
+  // Update total row
+  const totalCells = tbody.querySelectorAll('.total-row td');
+  if (totalCells.length >= 3) {
+    totalCells[totalCells.length-3].textContent = `$${totalLow.toFixed(2)}`;
+    totalCells[totalCells.length-2].textContent = `$${totalHigh.toFixed(2)}`;
+  }
+}
+
+// ── Copy to clipboard ─────────────────────────────────────
+async function copyCrop(index) {
+  const dataUrl = cropDataUrls[index];
+  if (!dataUrl) return;
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    showToast('📋 Copied to clipboard!');
+  } catch {
+    showToast('⚠ Copy not supported in this browser');
+  }
+}
+
+function showToast(msg) {
+  copyToast.textContent = msg;
+  copyToast.classList.add('show');
+  setTimeout(() => copyToast.classList.remove('show'), 2200);
+}
+
+// ── Crop Editor ───────────────────────────────────────────
+let cropScale = 1;
+
+function openCropEditor(cardIndex) {
+  editingCardIndex = cardIndex;
+  const card = cards[cardIndex];
+  document.getElementById('crop-modal-title').textContent = `Adjust Crop — ${card.name}`;
+  cropModal.classList.add('open');
+
+  // Draw image on canvas, scaled to fit
+  const maxW = Math.min(window.innerWidth * 0.85, 900);
+  const maxH = window.innerHeight * 0.62;
+  const iw = loadedImage.naturalWidth, ih = loadedImage.naturalHeight;
+  cropScale = Math.min(maxW / iw, maxH / ih, 1);
+  cropCanvas.width = Math.round(iw * cropScale);
+  cropCanvas.height = Math.round(ih * cropScale);
+  cropCtx.drawImage(loadedImage, 0, 0, cropCanvas.width, cropCanvas.height);
+
+  // Draw existing bbox if present
+  if (card.bbox) {
+    const bx = (card.bbox.x / 100) * cropCanvas.width;
+    const by = (card.bbox.y / 100) * cropCanvas.height;
+    const bw = (card.bbox.w / 100) * cropCanvas.width;
+    const bh = (card.bbox.h / 100) * cropCanvas.height;
+    currentCropRect = { x: bx, y: by, w: bw, h: bh };
+    drawCropOverlay();
+  } else {
+    currentCropRect = null;
+  }
+  cropDrag.active = false;
+}
+
+function drawCropOverlay() {
+  // Redraw base image
+  cropCtx.drawImage(loadedImage, 0, 0, cropCanvas.width, cropCanvas.height);
+  if (!currentCropRect) return;
+  const { x, y, w, h } = currentCropRect;
+  // Dim outside
+  cropCtx.fillStyle = 'rgba(0,0,0,0.55)';
+  cropCtx.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+  // Clear inside (show original)
+  cropCtx.clearRect(x, y, w, h);
+  cropCtx.drawImage(loadedImage,
+    x / cropScale, y / cropScale, w / cropScale, h / cropScale,
+    x, y, w, h);
+  // Border
+  cropCtx.strokeStyle = '#7c3aed';
+  cropCtx.lineWidth = 2;
+  cropCtx.setLineDash([6, 3]);
+  cropCtx.strokeRect(x, y, w, h);
+  cropCtx.setLineDash([]);
+  // Corner handles
+  const hs = 8;
+  cropCtx.fillStyle = '#7c3aed';
+  [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([cx,cy]) => {
+    cropCtx.fillRect(cx-hs/2, cy-hs/2, hs, hs);
+  });
+}
+
+cropCanvas.addEventListener('mousedown', (e) => {
+  const rect = cropCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  cropDrag = { active: true, startX: mx, startY: my, x: mx, y: my, w: 0, h: 0 };
+});
+
+cropCanvas.addEventListener('mousemove', (e) => {
+  if (!cropDrag.active) return;
+  const rect = cropCanvas.getBoundingClientRect();
+  const mx = Math.max(0, Math.min(cropCanvas.width, e.clientX - rect.left));
+  const my = Math.max(0, Math.min(cropCanvas.height, e.clientY - rect.top));
+  const x = Math.min(cropDrag.startX, mx);
+  const y = Math.min(cropDrag.startY, my);
+  const w = Math.abs(mx - cropDrag.startX);
+  const h = Math.abs(my - cropDrag.startY);
+  currentCropRect = { x, y, w, h };
+  drawCropOverlay();
+});
+
+cropCanvas.addEventListener('mouseup', () => { cropDrag.active = false; });
+cropCanvas.addEventListener('mouseleave', () => { cropDrag.active = false; });
+
+// Touch support
+cropCanvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const rect = cropCanvas.getBoundingClientRect();
+  const mx = t.clientX - rect.left, my = t.clientY - rect.top;
+  cropDrag = { active: true, startX: mx, startY: my };
+});
+cropCanvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!cropDrag.active) return;
+  const t = e.touches[0];
+  const rect = cropCanvas.getBoundingClientRect();
+  const mx = Math.max(0, Math.min(cropCanvas.width, t.clientX - rect.left));
+  const my = Math.max(0, Math.min(cropCanvas.height, t.clientY - rect.top));
+  const x = Math.min(cropDrag.startX, mx);
+  const y = Math.min(cropDrag.startY, my);
+  currentCropRect = { x, y, w: Math.abs(mx - cropDrag.startX), h: Math.abs(my - cropDrag.startY) };
+  drawCropOverlay();
+});
+cropCanvas.addEventListener('touchend', () => { cropDrag.active = false; });
+
+document.getElementById('crop-apply').addEventListener('click', () => {
+  if (!currentCropRect || currentCropRect.w < 5 || currentCropRect.h < 5) {
+    showToast('⚠ Draw a crop box first');
+    return;
+  }
+  // Convert canvas coords back to image pixels
+  const px = currentCropRect.x / cropScale;
+  const py = currentCropRect.y / cropScale;
+  const pw = currentCropRect.w / cropScale;
+  const ph = currentCropRect.h / cropScale;
+
+  // Update bbox on card
+  const iw = loadedImage.naturalWidth, ih = loadedImage.naturalHeight;
+  cards[editingCardIndex].bbox = {
+    x: (px / iw) * 100, y: (py / ih) * 100,
+    w: (pw / iw) * 100, h: (ph / ih) * 100
+  };
+
+  // Regenerate crop
+  const dataUrl = cropCardPixels(Math.round(px), Math.round(py), Math.round(pw), Math.round(ph));
+  if (dataUrl) cropDataUrls[editingCardIndex] = dataUrl;
+
+  closeCropModal();
+  renderTable();
+  showToast('✅ Crop updated!');
+});
+
+function closeCropModal() {
+  cropModal.classList.remove('open');
+  editingCardIndex = null;
+  currentCropRect = null;
+}
+document.getElementById('crop-modal-close').addEventListener('click', closeCropModal);
+document.getElementById('crop-cancel').addEventListener('click', closeCropModal);
+cropModal.addEventListener('click', (e) => { if (e.target === cropModal) closeCropModal(); });
+
+
+// ── PokémonTCG Live Prices ────────────────────────────────
+async function fetchLivePrices() {
+  const statusEl = document.getElementById('ptcg-status');
+  const apiKey = document.getElementById('ptcg-api-key').value.trim();
+  statusEl.textContent = 'Fetching live prices...';
+
+  let fetched = 0, failed = 0;
+
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['X-Api-Key'] = apiKey;
+
+      // Build query: name + set name, prefer exact matches
+      const q = `name:"${card.name}" set.name:"${card.set}"`;
+      const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=5`;
+      const res = await fetch(url, { headers });
+      const data = await res.json();
+
+      if (data.data && data.data.length > 0) {
+        // Try to find best match by set number if available
+        let match = data.data[0];
+        if (card.set_number) {
+          const byNum = data.data.find(c => c.number === card.set_number.split('/')[0]);
+          if (byNum) match = byNum;
+        }
+
+        const prices = match.tcgplayer?.prices;
+        if (prices) {
+          // Pick best price type: holofoil > reverseHolofoil > normal > 1stEditionHolofoil
+          const priceType = prices.holofoil || prices.reverseHolofoil || prices.normal || prices['1stEditionHolofoil'] || prices.unlimitedHolofoil;
+          if (priceType) {
+            const market = priceType.market || priceType.mid || null;
+            const high = priceType.mid || priceType.market || null;
+            if (market) {
+              cards[i].estimated_price_low = market;
+              cards[i].estimated_price_high = high || market;
+              cards[i]._priceSource = 'live';
+              cards[i]._tcgplayerUrl = match.tcgplayer?.url || null;
+              fetched++;
+            }
+          }
+        }
+      }
+
+      if (!cards[i]._priceSource) {
+        cards[i]._priceSource = 'estimated';
+        failed++;
+      }
+    } catch (e) {
+      cards[i]._priceSource = 'estimated';
+      failed++;
+    }
+
+    // Small delay to avoid rate limiting
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  renderTable();
+  // Update TCGPlayer URLs to direct links where available
+  statusEl.textContent = fetched > 0
+    ? `✓ ${fetched} live price${fetched !== 1 ? 's' : ''} loaded${failed > 0 ? `, ${failed} estimated` : ''}`
+    : `⚠ No live prices found — showing AI estimates`;
+  statusEl.style.color = fetched > 0 ? '#4ade80' : '#f59e0b';
+}
+
+// ── Sorting ───────────────────────────────────────────────
+document.querySelectorAll('th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (col === '#') return;
+    sortDir = (sortKey === col && sortDir === 'asc') ? 'desc' : 'asc';
+    sortKey = col;
+    document.querySelectorAll('th[data-col]').forEach(t => { t.textContent = t.textContent.replace(/ [↑↓]$/, ''); });
+    th.textContent += sortDir === 'asc' ? ' ↑' : ' ↓';
+    if (cards.length) renderTable();
+  });
+});
+
+// ── Export CSV ────────────────────────────────────────────
+exportBtn.addEventListener('click', () => {
+  const sorted = getSorted();
+  const totalLow = cards.reduce((s, c) => s + (Number(c.estimated_price_low)||0), 0);
+  const totalHigh = cards.reduce((s, c) => s + (Number(c.estimated_price_high)||0), 0);
+  const headers = ['Name','Set','Set Number','Card Type','Rarity','Condition','Est. Price Low ($)','Est. Price High ($)','Notes'];
+  const rows = sorted.map(c => [c.name,c.set,c.set_number||'',c.card_type,c.rarity,c.condition,Number(c.estimated_price_low).toFixed(2),Number(c.estimated_price_high).toFixed(2),c.notes||'']);
+  rows.push(['','','','','','TOTAL',totalLow.toFixed(2),totalHigh.toFixed(2),'']);
+  const csv = [headers,...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = 'pokemon-cards.csv'; a.click();
+});
+
+// ── Download All Crops (ZIP) ──────────────────────────────
+downloadAllBtn.addEventListener('click', async () => {
+  downloadAllBtn.innerHTML = '<span class="spinner">⟳</span> Zipping...';
+  downloadAllBtn.disabled = true;
+  try {
+    if (!window.JSZip) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const zip = new JSZip();
+    const folder = zip.folder('pokemon-crops');
+    cards.forEach((card, i) => {
+      const dataUrl = cropDataUrls[i];
+      if (!dataUrl) return;
+      const b64 = dataUrl.split(',')[1];
+      folder.file(`${String(i+1).padStart(2,'0')}-${slugify(card.name,card.set)}.jpg`, b64, {base64:true});
+    });
+    const blob = await zip.generateAsync({type:'blob'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'pokemon-crops.zip'; a.click();
+  } catch(err) { showToast('⚠ ZIP failed: ' + err.message); }
+  finally { downloadAllBtn.innerHTML = '⬇ Download All Crops'; downloadAllBtn.disabled = false; }
+});
+</script>
+</body>
+</html>
