@@ -305,8 +305,23 @@ IMPORTANT for bounding boxes: return coordinates that tightly wrap just the card
 For each card provide:
 - name: card name
 - set: set name
-- set_number: card number if visible, or null
-- rarity: (Common, Uncommon, Rare, Holo Rare, Ultra Rare, Secret Rare, etc.)
+- set_number: The number printed at the bottom of the card (e.g. "247/191", "15/102", "SM247"). Read this carefully — it is the most reliable identifier. Always include the full number including the slash and total (e.g. "4/102" not just "4").
+- rarity_symbol: The rarity symbol printed on the card bottom. Use these exact values based on the symbol:
+  Circle (●) = "Common"
+  Diamond (♦) = "Uncommon"  
+  Single black star (★) = "Rare"
+  Double black star (★★) = "Double Rare"
+  Pink/magenta star = "Ace Spec Rare"
+  Single yellow/gold star = "Illustration Rare"
+  Two silver stars = "Ultra Rare"
+  Two gold stars = "Special Illustration Rare"
+  Three gold stars = "Hyper Rare"
+  Single outline/hollow star = "Shiny Rare"
+  Three outline stars = "Shiny Ultra Rare"
+  PROMO stamp = "Black Star Promo"
+  No symbol but card number exceeds set total = "Secret Rare"
+  No symbol visible = use context clues from card appearance
+- rarity: Determine from the rarity_symbol field above. Use the exact rarity name from the symbol guide.
 - card_type: "Pokémon", "Trainer", or "Energy"
 - condition: (Mint, Near Mint, Lightly Played, Moderately Played, Heavily Played)
 - estimated_price_low: low-end USD price estimate (number only)
@@ -740,19 +755,62 @@ async function fetchLivePrices() {
       const headers = { 'Content-Type': 'application/json' };
       if (apiKey) headers['X-Api-Key'] = apiKey;
 
-      // Build query: name + set name, prefer exact matches
-      const q = `name:"${card.name}" set.name:"${card.set}"`;
-      const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=5`;
-      const res = await fetch(url, { headers });
-      const data = await res.json();
+      // Step 1: try name + set (strict)
+      let match = null;
+      const qStrict = `name:"${card.name}" set.name:"${card.set}"`;
+      const urlStrict = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStrict)}&pageSize=8`;
+      const resStrict = await fetch(urlStrict, { headers });
+      const dataStrict = await resStrict.json();
 
-      if (data.data && data.data.length > 0) {
-        // Try to find best match by set number if available
-        let match = data.data[0];
+      if (dataStrict.data && dataStrict.data.length > 0) {
+        match = dataStrict.data[0];
         if (card.set_number) {
-          const byNum = data.data.find(c => c.number === card.set_number.split('/')[0]);
+          const byNum = dataStrict.data.find(c => c.number === card.set_number.split('/')[0]);
           if (byNum) match = byNum;
         }
+      }
+
+      // Step 2: try name + number (very reliable if we have both)
+      if (!match && card.set_number) {
+        const cardNum = card.set_number.split('/')[0];
+        const qNum = `name:"${card.name}" number:${cardNum}`;
+        const urlNum = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qNum)}&pageSize=10`;
+        const resNum = await fetch(urlNum, { headers });
+        const dataNum = await resNum.json();
+        if (dataNum.data && dataNum.data.length > 0) {
+          match = dataNum.data[0];
+          cards[i].set = match.set?.name || cards[i].set;
+        }
+      }
+
+      // Step 3: name only, pick best match by set number then fuzzy set name
+      if (!match) {
+        const qName = `name:"${card.name}"`;
+        const urlName = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qName)}&pageSize=20`;
+        const resName = await fetch(urlName, { headers });
+        const dataName = await resName.json();
+        if (dataName.data && dataName.data.length > 0) {
+          // Prefer match by set number
+          if (card.set_number) {
+            const cardNum = card.set_number.split('/')[0];
+            const byNum = dataName.data.find(c => c.number === cardNum);
+            if (byNum) { match = byNum; }
+          }
+          // Fuzzy set name match
+          if (!match) {
+            const setLower = card.set.toLowerCase();
+            const bySet = dataName.data.find(c => c.set?.name?.toLowerCase().includes(setLower) || setLower.includes(c.set?.name?.toLowerCase()));
+            if (bySet) match = bySet;
+          }
+          // Last resort: first result with prices
+          if (!match) {
+            match = dataName.data.find(c => c.tcgplayer?.prices) || dataName.data[0];
+          }
+          if (match) cards[i].set = match.set?.name || cards[i].set;
+        }
+      }
+
+      if (match) {
 
         const prices = match.tcgplayer?.prices;
         if (prices) {
