@@ -855,7 +855,7 @@ scanBtn.addEventListener('click', async (e) => {
     const textBlock = data.content?.find(b => b.type === 'text');
     if (!textBlock) throw new Error('No response from AI.');
     let raw = textBlock.text.trim().replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(repairJson(raw));
     cards = parsed.cards || [];
     if (parsed.scan_notes) { scanNotesEl.textContent = '📋 ' + parsed.scan_notes; scanNotesEl.style.display = 'block'; }
     if (!loadedImage.complete) await new Promise(r => { loadedImage.onload = r; });
@@ -986,6 +986,26 @@ function renderTable() {
     <td></td><td colspan="5" class="total-label">TOTAL ESTIMATED VALUE</td>
     <td>$${totalLow.toFixed(2)}</td><td>$${totalHigh.toFixed(2)}</td><td></td><td></td>
   </tr>`;
+}
+
+// Claude sometimes returns near-valid JSON (trailing commas, an unescaped
+// quote in a card name, a truncated tail if it hit max_tokens). Try to
+// repair common issues before giving up, so one bad card doesn't kill the scan.
+function repairJson(raw) {
+  try { JSON.parse(raw); return raw; } catch {}
+  let fixed = raw;
+  fixed = fixed.replace(/,\s*([\]}])/g, '$1'); // trailing commas
+  try { JSON.parse(fixed); return fixed; } catch {}
+  // truncated response: close off the last complete card object and arrays
+  const lastGoodObj = fixed.lastIndexOf('},');
+  if (lastGoodObj > -1) {
+    let truncated = fixed.slice(0, lastGoodObj + 1);
+    const openBrackets = (truncated.match(/\[/g)||[]).length - (truncated.match(/\]/g)||[]).length;
+    const openBraces = (truncated.match(/\{/g)||[]).length - (truncated.match(/\}/g)||[]).length;
+    truncated += ']'.repeat(Math.max(0,openBrackets)) + '}'.repeat(Math.max(0,openBraces));
+    try { JSON.parse(truncated); return truncated; } catch {}
+  }
+  return raw; // give up, let the original error surface
 }
 
 function escHtml(str) {
