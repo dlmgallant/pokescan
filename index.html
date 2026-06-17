@@ -396,7 +396,7 @@
     <div class="crop-modal-header">
       <div>
         <div class="crop-modal-title" id="crop-modal-title">Adjust Crop</div>
-        <div class="crop-modal-hint">Click and drag to draw a new crop box</div>
+        <div class="crop-modal-hint" id="crop-modal-hint">Click and drag to draw a new crop box</div>
       </div>
       <button class="crop-modal-close" id="crop-modal-close">✕</button>
     </div>
@@ -947,7 +947,8 @@ function renderTable() {
       verifyCell = `<span class="verify-badge verify-ok" title="Matched in database via ${c._lookupMethod||'lookup'}">✓ verified</span>`;
     } else if (c._needsInput) {
       verifyCell = `<span class="verify-badge verify-input" title="${escHtml(c._flagReason||'Needs your input')}">✎ needs input</span>
-        <button class="reverify-btn" onclick="reverifyCard(${oi})" title="Re-check after editing">↻</button>`;
+        <button class="reverify-btn" onclick="reverifyCard(${oi})" title="Re-check after editing">↻</button>
+        <button class="reverify-btn" onclick="openCropEditor(${oi},'zoom-reread')" title="Zoom in and re-read this card with AI">🔍 zoom</button>`;
     } else if (c._verified === false) {
       verifyCell = `<span class="verify-badge verify-flag" title="${escHtml(c._flagReason||'Needs review')}">⚠ review</span>
         <button class="reverify-btn" onclick="reverifyCard(${oi})" title="Re-check against database">↻</button>`;
@@ -1054,10 +1055,17 @@ function showToast(msg) {
 // ── Crop Editor ───────────────────────────────────────────
 let cropScale = 1;
 
-function openCropEditor(cardIndex) {
+let cropEditorMode = 'crop'; // 'crop' | 'zoom-reread'
+function openCropEditor(cardIndex, mode) {
+  cropEditorMode = mode || 'crop';
   editingCardIndex = cardIndex;
   const card = cards[cardIndex];
-  document.getElementById('crop-modal-title').textContent = `Adjust Crop — ${card.name}`;
+  document.getElementById('crop-modal-title').textContent = cropEditorMode === 'zoom-reread'
+    ? `Draw a close box around "${card.name}" — corner + number`
+    : `Adjust Crop — ${card.name}`;
+  document.getElementById('crop-modal-hint').textContent = cropEditorMode === 'zoom-reread'
+    ? 'Tightly box this card (especially the bottom-left corner) so the AI can re-read it at higher detail.'
+    : 'Click and drag to draw a new crop box';
   cropModal.classList.add('open');
 
   // Draw image on canvas, scaled to fit
@@ -1154,7 +1162,7 @@ cropCanvas.addEventListener('touchmove', (e) => {
 });
 cropCanvas.addEventListener('touchend', () => { cropDrag.active = false; });
 
-document.getElementById('crop-apply').addEventListener('click', () => {
+document.getElementById('crop-apply').addEventListener('click', async () => {
   if (!currentCropRect || currentCropRect.w < 5 || currentCropRect.h < 5) {
     showToast('⚠ Draw a crop box first');
     return;
@@ -1164,6 +1172,12 @@ document.getElementById('crop-apply').addEventListener('click', () => {
   const py = currentCropRect.y / cropScale;
   const pw = currentCropRect.w / cropScale;
   const ph = currentCropRect.h / cropScale;
+
+  if (cropEditorMode === 'zoom-reread') {
+    closeCropModal();
+    await zoomRereadCard(editingCardIndex, Math.round(px), Math.round(py), Math.round(pw), Math.round(ph));
+    return;
+  }
 
   // Update bbox on card
   const iw = loadedImage.naturalWidth, ih = loadedImage.naturalHeight;
@@ -1180,6 +1194,71 @@ document.getElementById('crop-apply').addEventListener('click', () => {
   renderTable();
   showToast('✅ Crop updated!');
 });
+
+// Re-read a single flagged card at higher detail: crop it large, upscale if
+// small, send just that crop to Claude with a focused prompt, then re-verify.
+async function zoomRereadCard(cardIndex, px, py, pw, ph) {
+  const card = cards[cardIndex];
+  card._checking = true;
+  card._needsInput = false;
+  renderTable();
+
+  try {
+    // Crop at native resolution, then upscale to at least 900px tall so the
+    // corner text is bigger and sharper for the model to read.
+    const off = document.createElement('canvas');
+    const MIN_H = 900;
+    const scaleUp = ph < MIN_H ? MIN_H / ph : 1;
+    off.width = Math.round(pw * scaleUp);
+    off.height = Math.round(ph * scaleUp);
+    const offCtx = off.getContext('2d');
+    offCtx.imageSmoothingQuality = 'high';
+    offCtx.drawImage(loadedImage, px, py, pw, ph, 0, 0, off.width, off.height);
+    const zoomDataUrl = off.toDataURL('image/jpeg', 0.95);
+    const zoomBase64 = zoomDataUrl.split(',')[1];
+
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1024,
+        system: ZOOM_REREAD_PROMPT,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: zoomBase64 } },
+          { type: 'text', text: 'Read this single Pokémon card closely and return its identifying details.' }
+        ]}]
+      })
+    });
+    const data = await res.json();
+    const textBlock = (data.content || []).find(b => b.type === 'text');
+    if (!textBlock) throw new Error('No response');
+    const raw = textBlock.text.trim().replace(/```json|```/g, '').trim();
+    const result = JSON.parse(repairJson(raw));
+
+    // Merge whatever the focused re-read found (don't overwrite with nulls)
+    if (result.name) card.name = result.name;
+    if (result.set_code) card.set_code = result.set_code;
+    if (result.set_number) card.set_number = result.set_number;
+    if (result.set) card.set = result.set;
+
+    cropDataUrls[cardIndex] = zoomDataUrl; // also update the crop thumbnail
+    await reverifyCard(cardIndex);
+    showToast('🔍 Re-read complete');
+  } catch (e) {
+    card._checking = false;
+    card._needsInput = true;
+    renderTable();
+    showToast('⚠ Re-read failed — try drawing a tighter box');
+  }
+}
+
+const ZOOM_REREAD_PROMPT = `You are looking at a single, zoomed-in Pokémon card. Read the bottom-left
+corner carefully: the set code + language tag (e.g. "JTG EN") and the collector number (e.g. "083/159")
+sit there. Read character by character. If something is still not legible even at this zoom, return null
+for that field — do not guess.
+
+Respond ONLY with valid JSON, no markdown:
+{"name":"string or null","set_code":"string or null","set_number":"string or null","set":"string or null"}`;
 
 function closeCropModal() {
   cropModal.classList.remove('open');
