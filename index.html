@@ -621,87 +621,39 @@
 
 const WORKER_URL = "https://pokescan-proxy.dlmgallant.workers.dev";
 
-const SYSTEM_PROMPT = `You are an expert Pokémon TCG card identifier and price estimator. Identify EVERY visible card in the image.
+const SYSTEM_PROMPT = `You are looking at a photo that may contain multiple Pokémon cards. For EVERY visible card, identify it and locate it.
 
-LANGUAGE: Assume English unless non-English text is clearly visible. Do NOT infer language from art style alone.
+LANGUAGE: Assume English unless non-English text is clearly visible.
 
-═══ SET IDENTIFICATION ═══
-
-MODERN CARDS (2003–present): The set is identified by the code in the BOTTOM-LEFT corner. It looks like a small set-logo icon followed by a 2–4 letter code and a language tag — for example "JTG EN", "OBF EN", "PAR EN", "SVI EN". The collector number (e.g. "083/159") sits right next to it.
-
-CRITICAL RULES FOR READING THE SET CODE — follow exactly:
-1. Read the bottom-left code LETTER BY LETTER, exactly as printed. This is the single source of truth for the set.
-2. Do NOT infer the set from the card's art, color, border, or general appearance. The look of a card does NOT tell you its set.
-3. NEVER answer with a vague era name like "Scarlet & Violet" as the set. That is not a set — it is an era. If you can read the code, give the specific set it maps to. If you cannot read the code, return set_code AND set as null.
-4. If the code is blurry, glared, or cut off, return null for set_code — do NOT guess. A null is correct and useful; a guess is harmful.
-5. The collector number (the "083/159" part) is also critical — read it exactly, including the slash and total. Return null if you truly cannot read it.
-
-Map the code you read to the set name:
-  SVI = Scarlet & Violet Base Set
-  PAL = Paldea Evolved
-  OBF = Obsidian Flames
-  MEW = 151
-  PAR = Paradox Rift
-  PAF = Paldean Fates
-  TEF = Temporal Forces
-  TWM = Twilight Masquerade
-  SFA = Shrouded Fable
-  SCR = Stellar Crown
-  SSP = Surging Sparks
-  PRE = Prismatic Evolutions
-  JTG = Journey Together
-  DRI = Destined Rivals
-  SVP = Scarlet & Violet Promo
-  SM = Sun & Moon era (older)
-  XY = XY era (older)
-  BW = Black & White era (older)
-If the code you read is not in this list, still return the code exactly as you read it (the database will resolve it). Do NOT substitute a vague era name.
-
-VINTAGE CARDS (Base Set through EX era, ~1999–2003): No set code text. Identify by the SET SYMBOL icon printed near the bottom right of the card art or center bottom. Common symbols:
-  No symbol = Base Set (Shadowless or Unlimited) or Base Set 2
-  Lightning bolt through triangle = Fossil
-  Paw print = Jungle
-  Starburst/gear = Team Rocket
-  Pokéball = Base Set 2
-  Water drop = Neo Genesis
-  Leaf = Neo Discovery
-  Flame = Neo Revelation
-  Crystal = Neo Destiny
-  Sun = Legendary Collection
-  Eon ticket symbol = Aquapolis / Skyridge (e-reader era)
-  If you see "1st Edition" stamp on left side = note it
-
-═══ SET NUMBER ═══
-Read the number at the bottom of the card exactly as printed (e.g. "15/62", "104/091", "SM247"). If the printed number exceeds the set total (e.g. 104/091), this indicates a Secret Rare / Illustration Rare / Special card.
-
-═══ RARITY SYMBOL ═══
-Read the symbol at the bottom right of the card:
-  Circle (●) = "Common"
-  Diamond (♦) = "Uncommon"
-  Single black star (★) = "Rare"
-  Double black star (★★) = "Double Rare"
-  Pink/gold star = "Illustration Rare" or "Special Illustration Rare"
-  Three gold stars = "Hyper Rare"
-  Single outline star = "Shiny Rare"
-  PROMO stamp = "Black Star Promo"
-  No symbol, number exceeds set total = "Secret Rare"
+DO NOT attempt to identify the set, set code, or collector number in this pass. That is handled by a separate, dedicated step that reads each card's corner at high zoom. If you guess a set here, it will be wrong and will be discarded — so do not include it.
 
 For each card return:
 - name: exact card name as printed
-- set: full set name (derive from set code if visible, e.g. PFL → "Paldean Fates")
-- set_code: the 2–4 letter code from bottom left (e.g. "PFL", "OBF"). null for vintage cards without a code.
-- set_number: full number as printed (e.g. "104/091"). null if not visible.
-- rarity: from rarity symbol guide above
 - card_type: "Pokémon", "Trainer", or "Energy"
+- rarity_guess: your best guess at rarity from the card's visual treatment (holo/full-art/etc) — this is a GUESS, label it as such, it will be checked against the database later
 - condition: "Mint", "Near Mint", "Lightly Played", "Moderately Played", or "Heavily Played"
 - estimated_price_low: low-end USD estimate (number only)
 - estimated_price_high: high-end USD estimate (number only)
 - notes: seller notes only — "1st Edition", "Shadowless", "Holo", "Reverse Holo", "Full Art", "Promo". null for standard cards.
+- bbox: a bounding box around JUST this card, as percentages of the full image: {"x": left%, "y": top%, "w": width%, "h": height%}. Be generous rather than tight — it's fine if it includes a little background, but it must NOT cut off the card, especially the bottom edge where the corner text lives. This bbox will be used to crop and zoom into the card for a separate, careful read of its set code and number, so erring slightly larger is much better than erring tight.
 
 Respond ONLY with valid JSON, no markdown:
-{"cards":[{"name":"string","set":"string","set_code":"string or null","set_number":"string or null","rarity":"string","card_type":"string","condition":"string","estimated_price_low":number,"estimated_price_high":number,"notes":"string or null"}],"scan_notes":"string"}`;
+{"cards":[{"name":"string","card_type":"string","rarity_guess":"string","condition":"string","estimated_price_low":number,"estimated_price_high":number,"notes":"string or null","bbox":{"x":number,"y":number,"w":number,"h":number}}],"scan_notes":"string"}`;
 
-let cards = [];
+// ── Pass 2: dedicated corner-reading prompt ──
+// Used per-card, on a cropped+zoomed close-up that contains ONLY that card
+// (or mostly just it). This prompt has NO context about identifying a
+// Pokémon — it only asks for literal text, so there's nothing for the model
+// to pattern-match against and no incentive to guess a set from card art.
+const CORNER_READ_PROMPT = `You are looking at a close-up crop of a single Pokémon card. Your ONLY job is to transcribe printed text — you are not identifying a Pokémon or a set, you are reading characters off a label.
+
+Look at the BOTTOM-LEFT corner. On modern cards (2003+) there is a small set-logo icon followed by a 2-4 letter code and a language tag (e.g. "JTG EN", "OBF EN"), and next to it a collector number like "083/159". On vintage cards there is no code, just a small symbol icon and a number like "15/62".
+
+Read ONLY what is visibly printed. Do not infer, guess, or complete a code based on what set you think this might be. If the corner is cut off, blurred, glared, or the text is genuinely not legible even at this zoom, return null for that field — null is the correct and expected answer when the text isn't there to read, and it is far better than a guess.
+
+Respond ONLY with valid JSON, no markdown:
+{"set_code":"string or null","set_number":"string or null","rarity_symbol_description":"string or null describing the symbol shape/color if no code is present (vintage cards)"}`;
+
 let sortKey = null;
 let sortDir = 'asc';
 let imageBase64 = null;
@@ -833,20 +785,21 @@ scanBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   if (!imageBase64) return;
   scanBtn.disabled = true;
-  scanBtn.innerHTML = '<span class="spinner">⟳</span> Scanning cards...';
+  scanBtn.innerHTML = '<span class="spinner">⟳</span> Identifying cards...';
   errorBox.style.display = 'none';
   scanNotesEl.style.display = 'none';
   results.style.display = 'none';
   cards = []; cropDataUrls = {};
 
   try {
+    // ── PASS 1: identify cards + locate them. No set fields allowed. ──
     const res = await fetch(WORKER_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6', max_tokens: 4096, system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: imageMime, data: imageBase64 } },
-          { type: 'text', text: 'Identify all Pokémon cards in this image. Read the set name, set number, and rarity symbol carefully from each card.' }
+          { type: 'text', text: 'Identify every Pokémon card in this image and locate each one with a bounding box. Do not attempt to read the set or number — that happens in a separate step.' }
         ]}]
       })
     });
@@ -857,11 +810,27 @@ scanBtn.addEventListener('click', async (e) => {
     let raw = textBlock.text.trim().replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(repairJson(raw));
     cards = parsed.cards || [];
+    // map rarity_guess -> rarity (placeholder; verification will correct it)
+    cards.forEach(c => { c.rarity = c.rarity_guess || 'Unknown'; });
     if (parsed.scan_notes) { scanNotesEl.textContent = '📋 ' + parsed.scan_notes; scanNotesEl.style.display = 'block'; }
     if (!loadedImage.complete) await new Promise(r => { loadedImage.onload = r; });
     renderTable();
     results.style.display = 'block';
     document.getElementById('verify-btn').style.display = 'inline-flex';
+
+    // ── PASS 2: for each card with a usable bbox, crop+zoom and read ONLY
+    // the corner (set code + number). This call has no Pokémon-identification
+    // context, so there's nothing for the model to pattern-match against —
+    // it can only transcribe what's literally in the crop, or say null. ──
+    scanBtn.innerHTML = '<span class="spinner">⟳</span> Reading set codes...';
+    const cardsWithBbox = cards.map((c, i) => ({ c, i })).filter(({c}) => c.bbox && c.bbox.w > 0 && c.bbox.h > 0);
+    const CONCURRENCY = 4;
+    for (let batchStart = 0; batchStart < cardsWithBbox.length; batchStart += CONCURRENCY) {
+      const batch = cardsWithBbox.slice(batchStart, batchStart + CONCURRENCY);
+      await Promise.all(batch.map(({ c, i }) => readCorner(i, c.bbox)));
+      renderTable();
+    }
+
     // Verify against database (overwrites AI guesses with verified data)
     verifyAndPrice();
   } catch (err) {
@@ -872,6 +841,57 @@ scanBtn.addEventListener('click', async (e) => {
     scanBtn.innerHTML = '<span>⚡</span> Scan Cards';
   }
 });
+
+// Pass-2 worker: crop a card's bbox region, upscale for legibility, ask the
+// narrow CORNER_READ_PROMPT, and write set_code/set_number onto the card.
+// Never writes a "set" name here — that only comes from the database match.
+async function readCorner(cardIndex, bbox) {
+  const card = cards[cardIndex];
+  try {
+    if (!loadedImage || !loadedImage.complete) return;
+    const iw = loadedImage.naturalWidth, ih = loadedImage.naturalHeight;
+    const x = Math.max(0, (bbox.x / 100) * iw);
+    const y = Math.max(0, (bbox.y / 100) * ih);
+    const w = Math.min(iw - x, (bbox.w / 100) * iw);
+    const h = Math.min(ih - y, (bbox.h / 100) * ih);
+    if (w < 10 || h < 10) return;
+
+    // Crop the FULL card (generous bbox from pass 1), focused on the bottom
+    // portion where the corner lives, then upscale so tiny text becomes legible.
+    const off = document.createElement('canvas');
+    const MIN_H = 700;
+    const scaleUp = h < MIN_H ? MIN_H / h : 1;
+    off.width = Math.round(w * scaleUp);
+    off.height = Math.round(h * scaleUp);
+    const offCtxLocal = off.getContext('2d');
+    offCtxLocal.imageSmoothingQuality = 'high';
+    offCtxLocal.drawImage(loadedImage, x, y, w, h, 0, 0, off.width, off.height);
+    const cropDataUrl = off.toDataURL('image/jpeg', 0.92);
+    cropDataUrls[cardIndex] = cropDataUrl; // double duty: also the row's crop thumbnail
+    const base64 = cropDataUrl.split(',')[1];
+
+    const res = await fetch(WORKER_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 512,
+        system: CORNER_READ_PROMPT,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+          { type: 'text', text: 'Transcribe the set code and number from this card\'s corner, or null if not legible.' }
+        ]}]
+      })
+    });
+    const data = await res.json();
+    const textBlock = data.content?.find(b => b.type === 'text');
+    if (!textBlock) return;
+    const result = JSON.parse(repairJson(textBlock.text.trim().replace(/```json|```/g, '').trim()));
+    card.set_code = result.set_code || null;
+    card.set_number = result.set_number || null;
+    card.set = null; // never trust a set NAME from any AI pass — only the database supplies this
+  } catch (e) {
+    // leave set_code/number null on failure; verification will flag for input
+  }
+}
 
 // ── Colors ────────────────────────────────────────────────
 function rarityColor(r) {
