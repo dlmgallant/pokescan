@@ -189,7 +189,9 @@
   .verify-summary b.flag{color:#f59e0b}
 
   .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px}
-  table{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
+  table{width:100%;border-collapse:collapse;font-size:14px;min-width:920px}
+  thead th[data-col="name"],tbody td:nth-child(3){min-width:170px}
+  thead th[data-col="set"],tbody td:nth-child(4){min-width:120px}
   thead th{text-align:left;padding:13px 14px;font-family:var(--mono);font-size:11px;letter-spacing:.05em;color:var(--muted2);border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none;background:var(--raised)}
   thead th:hover{color:var(--text)}
   tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -205,7 +207,7 @@
   .editable-price{font-family:var(--mono);width:80px}
   .editable-price-high{color:var(--muted)}
   .editable-notes{font-size:13px;color:var(--muted)}
-  .card-sub{font-family:var(--mono);font-size:11px;color:var(--muted2);margin-top:2px;padding-left:7px}
+  .card-sub{font-family:var(--mono);font-size:11px;color:var(--muted2);margin-top:2px;padding-left:7px;white-space:nowrap}
   .card-name-link{display:block}
   .badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
   .price-cell{display:flex;align-items:center;gap:7px}
@@ -221,6 +223,13 @@
   .verify-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:5px;white-space:nowrap}
   .verify-ok{background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.3)}
   .verify-flag{background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.3);cursor:pointer}
+  .verify-input{background:rgba(34,211,238,.12);color:var(--h1);border:1px solid rgba(34,211,238,.35);cursor:pointer}
+  .needs-input-banner{display:none;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:13px 16px;border-radius:12px;background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.3);font-size:14px;color:var(--text)}
+  .needs-input-banner b{color:var(--h1);font-family:var(--mono)}
+  .needs-input-banner button{margin-left:auto;background:rgba(34,211,238,.15);border:1px solid rgba(34,211,238,.4);color:var(--h1);border-radius:8px;padding:7px 14px;font-family:var(--body);font-size:13px;font-weight:600;cursor:pointer}
+  tr.row-needs-input td:first-child{box-shadow:inset 3px 0 0 var(--h1)}
+  .editable.field-missing{border-color:var(--h1);background:rgba(34,211,238,.06)}
+  .editable.field-missing::placeholder{color:var(--h1);opacity:.7}
   .verify-checking{background:rgba(148,163,184,.12);color:var(--muted2);border:1px solid rgba(148,163,184,.3)}
   .reverify-btn{background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.4);color:#c4b5fd;border-radius:5px;font-size:10px;font-family:var(--mono);padding:3px 8px;cursor:pointer;margin-left:4px}
   .reverify-btn:hover{background:rgba(168,85,247,.28)}
@@ -353,6 +362,7 @@
           </div>
         </div>
 
+        <div id="needs-input-banner" class="needs-input-banner"></div>
         <div id="verify-summary-bar" class="verify-summary" style="display:none;padding:0 4px 12px"></div>
 
         <div class="table-wrap">
@@ -617,9 +627,16 @@ LANGUAGE: Assume English unless non-English text is clearly visible. Do NOT infe
 
 ═══ SET IDENTIFICATION ═══
 
-MODERN CARDS (2003–present): Look at the BOTTOM LEFT corner of the card. You will see a small set logo icon followed by a 2–4 letter set code and language tag (e.g. "PFL EN", "OBF EN", "PAR EN", "SVI EN"). Read this code — it is the most reliable identifier.
+MODERN CARDS (2003–present): The set is identified by the code in the BOTTOM-LEFT corner. It looks like a small set-logo icon followed by a 2–4 letter code and a language tag — for example "JTG EN", "OBF EN", "PAR EN", "SVI EN". The collector number (e.g. "083/159") sits right next to it.
 
-Common modern set codes:
+CRITICAL RULES FOR READING THE SET CODE — follow exactly:
+1. Read the bottom-left code LETTER BY LETTER, exactly as printed. This is the single source of truth for the set.
+2. Do NOT infer the set from the card's art, color, border, or general appearance. The look of a card does NOT tell you its set.
+3. NEVER answer with a vague era name like "Scarlet & Violet" as the set. That is not a set — it is an era. If you can read the code, give the specific set it maps to. If you cannot read the code, return set_code AND set as null.
+4. If the code is blurry, glared, or cut off, return null for set_code — do NOT guess. A null is correct and useful; a guess is harmful.
+5. The collector number (the "083/159" part) is also critical — read it exactly, including the slash and total. Return null if you truly cannot read it.
+
+Map the code you read to the set name:
   SVI = Scarlet & Violet Base Set
   PAL = Paldea Evolved
   OBF = Obsidian Flames
@@ -633,12 +650,12 @@ Common modern set codes:
   SSP = Surging Sparks
   PRE = Prismatic Evolutions
   JTG = Journey Together
-  PFL = Paldean Fates (alt code)
-  SV = generic Scarlet & Violet
+  DRI = Destined Rivals
   SVP = Scarlet & Violet Promo
-  SM = Sun & Moon era
-  XY = XY era
-  BW = Black & White era
+  SM = Sun & Moon era (older)
+  XY = XY era (older)
+  BW = Black & White era (older)
+If the code you read is not in this list, still return the code exactly as you read it (the database will resolve it). Do NOT substitute a vague era name.
 
 VINTAGE CARDS (Base Set through EX era, ~1999–2003): No set code text. Identify by the SET SYMBOL icon printed near the bottom right of the card art or center bottom. Common symbols:
   No symbol = Base Set (Shadowless or Unlimited) or Base Set 2
@@ -917,7 +934,10 @@ function renderTable() {
            <button class="btn-ghost" onclick="openCropEditor(${oi})">Draw</button>
          </div></td>`;
 
-    const rowClass = c._verified === false ? ' class="flagged"' : '';
+    const rowClass = c._needsInput ? ' class="flagged row-needs-input"' : (c._verified === false ? ' class="flagged"' : '');
+    const miss = c._missing || [];
+    const codeMissing = c._needsInput && (miss.includes('set_code') || miss.includes('number'));
+    const nameMissing = c._needsInput && miss.includes('name');
 
     // Verify badge
     let verifyCell;
@@ -925,6 +945,9 @@ function renderTable() {
       verifyCell = `<span class="verify-badge verify-checking">⟳ checking</span>`;
     } else if (c._verified === true) {
       verifyCell = `<span class="verify-badge verify-ok" title="Matched in database via ${c._lookupMethod||'lookup'}">✓ verified</span>`;
+    } else if (c._needsInput) {
+      verifyCell = `<span class="verify-badge verify-input" title="${escHtml(c._flagReason||'Needs your input')}">✎ needs input</span>
+        <button class="reverify-btn" onclick="reverifyCard(${oi})" title="Re-check after editing">↻</button>`;
     } else if (c._verified === false) {
       verifyCell = `<span class="verify-badge verify-flag" title="${escHtml(c._flagReason||'Needs review')}">⚠ review</span>
         <button class="reverify-btn" onclick="reverifyCard(${oi})" title="Re-check against database">↻</button>`;
@@ -937,9 +960,14 @@ function renderTable() {
       <td class="row-num">${displayIdx+1}</td>
       <td>
         <a class="card-name-link" href="${tcgUrl}" target="_blank" title="Search on TCGPlayer">
-          <input class="editable editable-name" value="${escHtml(c.name)}" onchange="updateCard(${oi},'name',this.value)" onclick="event.stopPropagation()" />
+          <input class="editable editable-name${nameMissing?' field-missing':''}" value="${escHtml(c.name)}" placeholder="${nameMissing?'enter card name':''}" onchange="updateCard(${oi},'name',this.value)" onclick="event.stopPropagation()" />
         </a>
-        ${c.set_number ? `<div class="card-sub">#${escHtml(c.set_number)}${c.set_code ? ' · '+escHtml(c.set_code) : ''} · ${escHtml(c.card_type||'')}</div>` : ''}
+        ${c._needsInput
+          ? `<div class="card-sub" style="display:flex;gap:6px;padding-left:7px;margin-top:4px">
+               <input class="editable${codeMissing?' field-missing':''}" style="font-size:11px;width:70px;font-family:var(--mono)" value="${escHtml(c.set_code||'')}" placeholder="set code" onchange="updateCard(${oi},'set_code',this.value)" />
+               <input class="editable${codeMissing?' field-missing':''}" style="font-size:11px;width:80px;font-family:var(--mono)" value="${escHtml(c.set_number||'')}" placeholder="number" onchange="updateCard(${oi},'set_number',this.value)" />
+             </div>`
+          : (c.set_number ? `<div class="card-sub">#${escHtml(c.set_number)}${c.set_code ? ' · '+escHtml(c.set_code) : ''} · ${escHtml(c.card_type||'')}</div>` : '')}
       </td>
       <td><input class="editable" style="font-size:13px;color:#94a3b8;width:130px" value="${escHtml(c.set)}" onchange="updateCard(${oi},'set',this.value)" /></td>
       <td><input class="editable" style="font-size:12px;color:${rc};width:115px;font-weight:600" value="${escHtml(c.rarity)}" onchange="updateCard(${oi},'rarity',this.value)" /></td>
@@ -1209,6 +1237,8 @@ function applyMatch(card, result) {
   card._confidence = result.confidence || 'none';
   card._candidates = result.candidates || 0;
   card._flags = result.flags || [];
+  card._needsInput = result.needs_input === true;
+  card._missing = result.missing || [];
 
   const vd = result.verified_data;
   if (!vd) {
@@ -1287,20 +1317,42 @@ async function reverifyCard(index) {
 
 function updateVerifySummary() {
   const bar = document.getElementById('verify-summary-bar');
-  const verified = cards.filter(c => c._verified).length;
-  const flagged = cards.filter(c => c._verified === false).length;
+  const verified = cards.filter(c => c._verified === true).length;
+  const needsInput = cards.filter(c => c._needsInput === true).length;
+  const flagged = cards.filter(c => c._verified === false && !c._needsInput).length;
   const live = cards.filter(c => c._priceSource === 'live').length;
   bar.style.display = 'flex';
   bar.innerHTML = `<span><b class="ok">✓ ${verified}</b> verified</span>` +
+    (needsInput > 0 ? `<span><b style="color:var(--h1)">✎ ${needsInput}</b> need input</span>` : '') +
     (flagged > 0 ? `<span><b class="flag">⚠ ${flagged}</b> need review</span>` : '') +
     `<span>${live} live price${live!==1?'s':''}</span>` +
     `<span style="color:#64748b">Edit any flagged card and it re-checks automatically</span>`;
 
+  // Banner: collect cards that need the user to type something
+  const banner = document.getElementById('needs-input-banner');
+  if (needsInput > 0) {
+    banner.style.display = 'flex';
+    banner.innerHTML = `<span>📸 <b>${needsInput}</b> card${needsInput!==1?'s':''} couldn't be read fully — type the highlighted field${needsInput!==1?'s':''} (set code or number) to identify ${needsInput!==1?'them':'it'}. Re-checks automatically.</span>` +
+      `<button onclick="scrollToFirstNeedsInput()">Jump to first →</button>`;
+  } else {
+    banner.style.display = 'none';
+  }
+
   const statusEl = document.getElementById('ptcg-status');
-  statusEl.textContent = flagged === 0
+  const openItems = needsInput + flagged;
+  statusEl.textContent = openItems === 0
     ? `✓ All ${verified} cards verified`
-    : `${verified} verified · ${flagged} flagged for review`;
-  statusEl.style.color = flagged === 0 ? '#4ade80' : '#f59e0b';
+    : `${verified} verified · ${needsInput} need input · ${flagged} flagged`;
+  statusEl.style.color = openItems === 0 ? '#4ade80' : (needsInput > 0 ? '#22D3EE' : '#f59e0b');
+}
+
+function scrollToFirstNeedsInput() {
+  const row = document.querySelector('tr.row-needs-input');
+  if (row) {
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const input = row.querySelector('.editable.field-missing');
+    if (input) setTimeout(() => input.focus(), 400);
+  }
 }
 
 // ── Sorting ───────────────────────────────────────────────
@@ -1336,7 +1388,7 @@ exportBtn.addEventListener('click', () => {
   a.download = 'pokemon-cards.csv'; a.click();
 });
 
-//  ── Download All Crops (ZIP) ──────────────────────────────
+// ── Download All Crops (ZIP) ──────────────────────────────
 document.getElementById('verify-btn').addEventListener('click', verifyAndPrice);
 
 downloadAllBtn.addEventListener('click', async () => {
