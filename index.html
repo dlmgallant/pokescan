@@ -620,6 +620,9 @@
 <script>
 
 const WORKER_URL = "https://pokescan-proxy.dlmgallant.workers.dev";
+// OCR worker (Google Vision proxy). Leave "" to disable OCR and use LLM-only
+// corner reading. Set to your deployed pokescan-ocr URL to enable OCR-first.
+const OCR_WORKER_URL = "https://pokescan-ocr.dlmgallant.workers.dev";
 
 const SYSTEM_PROMPT = `You are looking at a photo that may contain multiple Pokémon cards. For EVERY visible card, identify it and locate it.
 
@@ -707,12 +710,17 @@ function handleFile(file) {
   reader.onload = (e) => {
     const img = new Image();
     img.onload = () => {
-      // Compress to stay under 8MB (10MB API limit with headroom)
-      const MAX_BYTES = 8 * 1024 * 1024;
+      // loadedImage stays at FULL native resolution — pass 2 crops tiny corner
+      // regions out of it, so every pixel of detail matters there.
+      loadedImage = img;
+
+      // For PASS 1 (whole-grid identification) we send a compressed copy.
+      // The API effectively samples ~1568px anyway, so downscaling here only
+      // affects the overview read, NOT the per-card corner reads.
+      const MAX_BYTES = 4.5 * 1024 * 1024;
       const canvas = document.createElement('canvas');
       let { naturalWidth: w, naturalHeight: h } = img;
-      // Scale down if huge — cap longest side at 4000px
-      const MAX_DIM = 4000;
+      const MAX_DIM = 2200; // plenty for finding cards in a grid
       if (w > MAX_DIM || h > MAX_DIM) {
         const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
         w = Math.round(w * ratio);
@@ -721,8 +729,7 @@ function handleFile(file) {
       canvas.width = w;
       canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      // Try quality 0.92 first, then reduce until under limit
-      let quality = 0.92;
+      let quality = 0.9;
       let dataUrl;
       do {
         dataUrl = canvas.toDataURL('image/jpeg', quality);
@@ -856,10 +863,9 @@ async function readCorner(cardIndex, bbox) {
     const h = Math.min(ih - y, (bbox.h / 100) * ih);
     if (w < 10 || h < 10) return;
 
-    // Crop the FULL card (generous bbox from pass 1), focused on the bottom
-    // portion where the corner lives, then upscale so tiny text becomes legible.
+    // Crop the FULL card from full-res source, upscale for the thumbnail + context.
     const off = document.createElement('canvas');
-    const MIN_H = 700;
+    const MIN_H = 800;
     const scaleUp = h < MIN_H ? MIN_H / h : 1;
     off.width = Math.round(w * scaleUp);
     off.height = Math.round(h * scaleUp);
@@ -867,8 +873,53 @@ async function readCorner(cardIndex, bbox) {
     offCtxLocal.imageSmoothingQuality = 'high';
     offCtxLocal.drawImage(loadedImage, x, y, w, h, 0, 0, off.width, off.height);
     const cropDataUrl = off.toDataURL('image/jpeg', 0.92);
-    cropDataUrls[cardIndex] = cropDataUrl; // double duty: also the row's crop thumbnail
+    cropDataUrls[cardIndex] = cropDataUrl; // row thumbnail
     const base64 = cropDataUrl.split(',')[1];
+
+    // ALSO crop just the BOTTOM-LEFT region (where the set code + number print)
+    // and upscale it hard, so the corner text is as large and sharp as possible.
+    // The corner occupies roughly the left 45% and bottom 18% of a card.
+    const cornerSrcX = x;
+    const cornerSrcY = y + h * 0.80;
+    const cornerSrcW = w * 0.50;
+    const cornerSrcH = h * 0.20;
+    const corner = document.createElement('canvas');
+    const CORNER_MIN_W = 1000;
+    const cScale = cornerSrcW < CORNER_MIN_W ? CORNER_MIN_W / cornerSrcW : 1;
+    corner.width = Math.round(cornerSrcW * cScale);
+    corner.height = Math.round(cornerSrcH * cScale);
+    const cCtx = corner.getContext('2d');
+    cCtx.imageSmoothingQuality = 'high';
+    cCtx.drawImage(loadedImage, cornerSrcX, cornerSrcY, cornerSrcW, cornerSrcH, 0, 0, corner.width, corner.height);
+    const cornerB64 = corner.toDataURL('image/jpeg', 0.95).split(',')[1];
+
+    // ── OCR FIRST (if configured) ──
+    // OCR is purpose-built for small printed text. Try it on the corner crop.
+    let ocrHint = null;
+    if (OCR_WORKER_URL) {
+      try {
+        const ocrRes = await fetch(`${OCR_WORKER_URL}/ocr`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: cornerB64 })
+        });
+        const ocr = await ocrRes.json();
+        if (ocr.ok) {
+          ocrHint = ocr.text || null;
+          // If OCR cleanly parsed both fields, trust it and skip the LLM entirely.
+          if (ocr.parsed && ocr.parsed.set_code && ocr.parsed.set_number) {
+            card.set_code = ocr.parsed.set_code;
+            card.set_number = ocr.parsed.set_number;
+            card.set = null;
+            return;
+          }
+        }
+      } catch (e) { /* OCR optional — fall through to LLM */ }
+    }
+
+    // ── LLM read (with OCR text as a hint if we have it) ──
+    const hintText = ocrHint
+      ? `An OCR engine read this raw text from the corner (it may contain character errors like 0/O or 1/I — correct them): "${ocrHint}". Use it together with the images to determine the correct set code and number.`
+      : 'Transcribe the set code and collector number. Use the zoomed corner view to read the small text. Return null for anything not legible.';
 
     const res = await fetch(WORKER_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -876,8 +927,11 @@ async function readCorner(cardIndex, bbox) {
         model: 'claude-sonnet-4-6', max_tokens: 512,
         system: CORNER_READ_PROMPT,
         messages: [{ role: 'user', content: [
+          { type: 'text', text: 'Here is a full Pokémon card:' },
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-          { type: 'text', text: 'Transcribe the set code and number from this card\'s corner, or null if not legible.' }
+          { type: 'text', text: 'And here is a zoomed-in view of its bottom-left corner, where the set code and collector number are printed:' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cornerB64 } },
+          { type: 'text', text: hintText }
         ]}]
       })
     });
