@@ -213,6 +213,26 @@
   .price-cell{display:flex;align-items:center;gap:7px}
   .price-source{font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:4px;white-space:nowrap}
   .price-live{background:rgba(34,197,94,.12);color:var(--green)}
+
+  /* Mobile: stack each row as a card so nothing gets cut off */
+  @media(max-width:640px){
+    .table-wrap{overflow-x:visible;border:none;border-radius:0}
+    table{min-width:0;font-size:13px}
+    thead{display:none}
+    tbody tr{display:block;border:1px solid var(--line);border-radius:12px;margin-bottom:12px;padding:12px;background:var(--panel)}
+    tbody tr.flagged{background:rgba(245,158,11,.06)}
+    tbody tr.total-row{background:var(--raised)}
+    tbody td{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;border:none;text-align:right}
+    tbody td::before{content:attr(data-label);font-family:var(--mono);font-size:11px;color:var(--muted2);text-align:left;flex-shrink:0;text-transform:uppercase;letter-spacing:.04em}
+    tbody td:first-child{box-shadow:none!important}
+    tbody td .editable{width:auto;flex:1;text-align:right;max-width:60%}
+    tbody td.cell-name{flex-direction:column;align-items:stretch;text-align:left}
+    tbody td.cell-name::before{margin-bottom:4px}
+    .card-sub{white-space:normal}
+    .card-name-link{display:block;text-align:left}
+    tbody td.cell-crop{justify-content:flex-start}
+    tbody td.cell-crop::before{content:none}
+  }
   .price-estimated{background:rgba(148,163,184,.12);color:var(--muted2)}
   .crop-thumb{width:42px;height:58px;object-fit:cover;border-radius:6px;border:1px solid var(--line2);cursor:pointer;background:var(--raised)}
   .crop-btn{width:42px;height:58px;border-radius:6px;border:1px dashed var(--line2);background:var(--raised);color:var(--muted);cursor:pointer;font-size:15px}
@@ -622,7 +642,7 @@
 const WORKER_URL = "https://pokescan-proxy.dlmgallant.workers.dev";
 // OCR worker (Google Vision proxy). Leave "" to disable OCR and use LLM-only
 // corner reading. Set to your deployed pokescan-ocr URL to enable OCR-first.
-const OCR_WORKER_URL = "https://pokescan-ocr.dlmgallant.workers.dev";
+const OCR_WORKER_URL = "";
 
 const SYSTEM_PROMPT = `You are looking at a photo that may contain multiple Pokémon cards. For EVERY visible card, identify it and locate it.
 
@@ -995,7 +1015,7 @@ function renderTable() {
     const tcgUrl = c._tcgplayerUrl || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(tcgSearchQ)}&view=grid`;
 
     const thumbCell = cropSrc
-      ? `<td><div class="crop-cell">
+      ? `<td class="cell-crop" data-label="Crop"><div class="crop-cell">
            <img class="crop-thumb" src="${cropSrc}" alt="${c.name}" title="Click to edit crop" onclick="openCropEditor(${oi})" />
            <div class="crop-actions">
              <a class="btn-ghost" href="${cropSrc}" download="${filename}" title="Download">↓</a>
@@ -1003,7 +1023,7 @@ function renderTable() {
              <button class="btn-ghost" onclick="openCropEditor(${oi})" title="Edit crop">✏</button>
            </div>
          </div></td>`
-      : `<td><div class="crop-cell">
+      : `<td class="cell-crop" data-label="Crop"><div class="crop-cell">
            <div class="crop-pending" title="No crop — click to draw one" onclick="openCropEditor(${oi})" style="cursor:pointer">✏</div>
            <button class="btn-ghost" onclick="openCropEditor(${oi})">Draw</button>
          </div></td>`;
@@ -1032,8 +1052,8 @@ function renderTable() {
 
     return `<tr${rowClass}>
       ${thumbCell}
-      <td class="row-num">${displayIdx+1}</td>
-      <td>
+      <td class="row-num" data-label="#">${displayIdx+1}</td>
+      <td class="cell-name" data-label="Card">
         <a class="card-name-link" href="${tcgUrl}" target="_blank" title="Search on TCGPlayer">
           <input class="editable editable-name${nameMissing?' field-missing':''}" value="${escHtml(c.name)}" placeholder="${nameMissing?'enter card name':''}" onchange="updateCard(${oi},'name',this.value)" onclick="event.stopPropagation()" />
         </a>
@@ -1044,16 +1064,16 @@ function renderTable() {
              </div>`
           : (c.set_number ? `<div class="card-sub">#${escHtml(c.set_number)}${c.set_code ? ' · '+escHtml(c.set_code) : ''} · ${escHtml(c.card_type||'')}</div>` : '')}
       </td>
-      <td><input class="editable" style="font-size:13px;color:#94a3b8;width:130px" value="${escHtml(c.set)}" onchange="updateCard(${oi},'set',this.value)" /></td>
-      <td><input class="editable" style="font-size:12px;color:${rc};width:115px;font-weight:600" value="${escHtml(c.rarity)}" onchange="updateCard(${oi},'rarity',this.value)" /></td>
-      <td><span class="badge" style="background:${cc}18;color:${cc};border:1px solid ${cc}40">${escHtml(c.condition)}</span></td>
-      <td><div class="price-cell">
+      <td class="cell-set" data-label="Set"><input class="editable" style="font-size:13px;color:#94a3b8;width:130px" value="${escHtml(c.set)}" onchange="updateCard(${oi},'set',this.value)" /></td>
+      <td class="cell-rarity" data-label="Rarity"><input class="editable" style="font-size:12px;color:${rc};width:115px;font-weight:600" value="${escHtml(c.rarity)}" onchange="updateCard(${oi},'rarity',this.value)" /></td>
+      <td class="cell-condition" data-label="Condition"><span class="badge" style="background:${cc}18;color:${cc};border:1px solid ${cc}40">${escHtml(c.condition)}</span></td>
+      <td class="cell-price" data-label="Market $"><div class="price-cell">
         <input class="editable editable-price" value="${Number(c.estimated_price_low).toFixed(2)}" onchange="updateCard(${oi},'estimated_price_low',parseFloat(this.value)||0)" />
         <span class="price-source ${c._priceSource === 'live' ? 'price-live' : 'price-estimated'}">${c._priceSource === 'live' ? '● LIVE' : '● EST'}</span>
       </div></td>
-      <td><input class="editable editable-price editable-price-high" value="${Number(c.estimated_price_high).toFixed(2)}" onchange="updateCard(${oi},'estimated_price_high',parseFloat(this.value)||0)" /></td>
-      <td><input class="editable editable-notes" value="${escHtml(c.notes||'')}" onchange="updateCard(${oi},'notes',this.value)" /></td>
-      <td style="white-space:nowrap">${verifyCell}</td>
+      <td class="cell-price-high" data-label="Mid $"><input class="editable editable-price editable-price-high" value="${Number(c.estimated_price_high).toFixed(2)}" onchange="updateCard(${oi},'estimated_price_high',parseFloat(this.value)||0)" /></td>
+      <td class="cell-notes" data-label="Notes"><input class="editable editable-notes" value="${escHtml(c.notes||'')}" onchange="updateCard(${oi},'notes',this.value)" /></td>
+      <td class="cell-verify" data-label="Status" style="white-space:nowrap">${verifyCell}</td>
     </tr>`;
   }).join('');
 
