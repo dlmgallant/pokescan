@@ -875,13 +875,13 @@ scanBtn.addEventListener('click', async (e) => {
 async function readCorner(cardIndex, bbox) {
   const card = cards[cardIndex];
   try {
-    if (!loadedImage || !loadedImage.complete) return;
+    if (!loadedImage || !loadedImage.complete) { console.warn('[readCorner] image not ready for card', cardIndex); return; }
     const iw = loadedImage.naturalWidth, ih = loadedImage.naturalHeight;
     const x = Math.max(0, (bbox.x / 100) * iw);
     const y = Math.max(0, (bbox.y / 100) * ih);
     const w = Math.min(iw - x, (bbox.w / 100) * iw);
     const h = Math.min(ih - y, (bbox.h / 100) * ih);
-    if (w < 10 || h < 10) return;
+    if (w < 10 || h < 10) { console.warn('[readCorner] bbox too small for card', cardIndex, {w,h}); return; }
 
     // Crop the FULL card from full-res source, upscale for the thumbnail + context.
     const off = document.createElement('canvas');
@@ -963,7 +963,9 @@ async function readCorner(cardIndex, bbox) {
     card.set_number = result.set_number || null;
     card.set = null; // never trust a set NAME from any AI pass — only the database supplies this
   } catch (e) {
-    // leave set_code/number null on failure; verification will flag for input
+    console.error('[readCorner] card', cardIndex, 'failed:', e);
+    window.__cornerErrors = window.__cornerErrors || [];
+    window.__cornerErrors.push({ card: cardIndex, error: String(e && e.message || e) });
   }
 }
 
