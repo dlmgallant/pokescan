@@ -674,7 +674,13 @@ Look at the BOTTOM-LEFT corner. On modern cards (2003+) there is a small set-log
 
 Read ONLY what is visibly printed. Do not infer, guess, or complete a code based on what set you think this might be. If the corner is cut off, blurred, glared, or the text is genuinely not legible even at this zoom, return null for that field — null is the correct and expected answer when the text isn't there to read, and it is far better than a guess.
 
-Respond ONLY with valid JSON, no markdown:
+OUTPUT FORMAT — this is strict and has no exceptions:
+Return a single JSON object and NOTHING else. No preamble, no explanation, no markdown fences, no apology, no commentary about image quality. If you cannot read the text, that is a normal and expected outcome — express it as null values inside the JSON, never as a sentence.
+
+Correct when readable:      {"set_code":"JTG","set_number":"048/159","rarity_symbol_description":null}
+Correct when unreadable:    {"set_code":null,"set_number":null,"rarity_symbol_description":null}
+WRONG (never do this):      The zoomed image shows a card whose corner is not legible...
+
 {"set_code":"string or null","set_number":"string or null","rarity_symbol_description":"string or null describing the symbol shape/color if no code is present (vintage cards)"}`;
 
 let sortKey = null;
@@ -958,7 +964,12 @@ async function readCorner(cardIndex, bbox) {
     const data = await res.json();
     const textBlock = data.content?.find(b => b.type === 'text');
     if (!textBlock) return;
-    const result = JSON.parse(repairJson(textBlock.text.trim().replace(/```json|```/g, '').trim()));
+    const result = extractJson(textBlock.text);
+    if (!result) {
+      console.warn('[readCorner] card', cardIndex, 'returned prose, not JSON:', textBlock.text.slice(0, 120));
+      card.set_code = null; card.set_number = null; card.set = null;
+      return;
+    }
     card.set_code = result.set_code || null;
     card.set_number = result.set_number || null;
     card.set = null; // never trust a set NAME from any AI pass — only the database supplies this
@@ -1088,6 +1099,22 @@ function renderTable() {
 // Claude sometimes returns near-valid JSON (trailing commas, an unescaped
 // quote in a card name, a truncated tail if it hit max_tokens). Try to
 // repair common issues before giving up, so one bad card doesn't kill the scan.
+// Models sometimes answer with prose instead of JSON. Pull the first JSON
+// object out of a mixed response; return null if there genuinely isn't one.
+function extractJson(text) {
+  if (!text) return null;
+  let t = String(text).trim().replace(/```json|```/g, '').trim();
+  try { return JSON.parse(t); } catch {}
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    const slice = t.slice(start, end + 1);
+    try { return JSON.parse(slice); } catch {}
+    try { return JSON.parse(repairJson(slice)); } catch {}
+  }
+  return null;
+}
+
 function repairJson(raw) {
   try { JSON.parse(raw); return raw; } catch {}
   let fixed = raw;
